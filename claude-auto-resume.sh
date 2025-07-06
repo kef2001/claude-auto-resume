@@ -3,6 +3,71 @@
 # Auto-resume script for Claude CLI tasks
 # Depends only on standard shell commands and claude CLI
 
+# Default prompt to use when resuming
+DEFAULT_PROMPT="continue"
+# Default is to start new session (no -c flag)
+USE_CONTINUE_FLAG=false
+
+# Function to show help
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS] [PROMPT]
+
+Automatically resume Claude CLI tasks after usage limits are lifted.
+
+OPTIONS:
+    -p, --prompt PROMPT    Custom prompt to use when resuming (default: "continue")
+    -c, --continue        Continue previous conversation (add -c flag to claude command)
+    -h, --help           Show this help message
+
+ARGUMENTS:
+    PROMPT               Custom prompt to use when resuming (alternative to -p)
+
+EXAMPLES:
+    $0                                    # Start new session with "continue"
+    $0 "implement user authentication"    # Start new session with custom prompt
+    $0 -p "write unit tests"             # Start new session with -p flag
+    $0 -c "please continue the task"     # Continue previous conversation
+    $0 -c -p "resume where we left off"  # Continue previous conversation with -p flag
+
+NOTES:
+    - By default, starts a new session (uses claude without -c)
+    - Use -c/--continue to continue the previous conversation
+    - This matches the natural expectation: new session by default, explicit flag to continue
+
+EOF
+}
+
+# Parse command line arguments
+CUSTOM_PROMPT="$DEFAULT_PROMPT"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -p|--prompt)
+            CUSTOM_PROMPT="$2"
+            shift 2
+            ;;
+        -c|--continue)
+            USE_CONTINUE_FLAG=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+        *)
+            # If no flag specified, treat as prompt argument
+            CUSTOM_PROMPT="$1"
+            shift
+            ;;
+    esac
+done
+
 # 1. Run the claude CLI command (replace with actual command as needed)
 CLAUDE_OUTPUT=$(claude -p 'check' 2>&1)
 RET_CODE=$?
@@ -52,8 +117,13 @@ if [ -n "$LIMIT_MSG" ]; then
   fi
 
   sleep 10
-  echo "Automatically resuming Claude task..."
-  CLAUDE_OUTPUT2=$(claude -c --dangerously-skip-permissions -p 'continue' 2>&1)
+  if [ "$USE_CONTINUE_FLAG" = true ]; then
+    echo "Automatically continuing previous Claude conversation with prompt: '$CUSTOM_PROMPT'"
+    CLAUDE_OUTPUT2=$(claude -c --dangerously-skip-permissions -p "$CUSTOM_PROMPT" 2>&1)
+  else
+    echo "Automatically starting new Claude session with prompt: '$CUSTOM_PROMPT'"
+    CLAUDE_OUTPUT2=$(claude --dangerously-skip-permissions -p "$CUSTOM_PROMPT" 2>&1)
+  fi
   RET_CODE2=$?
   if [ $RET_CODE2 -ne 0 ]; then
     echo "[ERROR] Claude CLI failed after resume. Output:"

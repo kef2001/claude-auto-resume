@@ -39,7 +39,12 @@ chmod +x claude-auto-resume.sh
 
 ## Key Commands
 
-- `claude-auto-resume` - Execute the auto-resume script (after global installation)
+- `claude-auto-resume` - Start new session with default prompt "continue"
+- `claude-auto-resume "custom prompt"` - Start new session with custom prompt
+- `claude-auto-resume -p "prompt"` - Start new session with custom prompt using flag
+- `claude-auto-resume -c "continue task"` - Continue previous conversation with custom prompt
+- `claude-auto-resume -c -p "prompt"` - Continue previous conversation with custom prompt using flag
+- `claude-auto-resume --help` - Show help and usage examples
 - `./claude-auto-resume.sh` - Execute the script locally
 - `chmod +x claude-auto-resume.sh` - Make the script executable
 - `make test` - Test script syntax
@@ -52,11 +57,14 @@ The project follows a single-file architecture:
 - **docs/**: Documentation including PRD, architecture, and user stories
 
 ### Core Logic Flow
-1. Runs `claude -p 'check'` command
-2. Parses output for usage limit messages with format: `Claude AI usage limit reached|<timestamp>`
-3. Calculates wait time from timestamp
-4. Displays countdown timer and waits
-5. Automatically runs `claude -c -p 'continue'` after wait period
+1. Parses command line arguments for custom prompt and session type (new vs continue)
+2. Runs `claude -p 'check'` command
+3. Parses output for usage limit messages with format: `Claude AI usage limit reached|<timestamp>`
+4. Calculates wait time from timestamp
+5. Displays countdown timer and waits
+6. Automatically runs either:
+   - `claude --dangerously-skip-permissions -p '<custom-prompt>'` (new session, default)
+   - `claude -c --dangerously-skip-permissions -p '<custom-prompt>'` (continue conversation with -c flag)
 
 ### Dependencies
 - Standard Unix utilities: `grep`, `date`, `sleep`, `awk`

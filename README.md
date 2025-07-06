@@ -55,20 +55,42 @@ chmod +x claude-auto-resume.sh
 
 ## Usage
 
-### After Global Installation
+### Basic Usage
 
 ```bash
+# Start new session with default prompt "continue"
 claude-auto-resume
+
+# Start new session with custom prompt
+claude-auto-resume "implement user authentication"
+
+# Start new session with custom prompt using flag
+claude-auto-resume -p "write unit tests"
+
+# Continue previous conversation with custom prompt
+claude-auto-resume -c "please continue the previous task"
+
+# Continue previous conversation with custom prompt using flag
+claude-auto-resume -c -p "resume where we left off"
+
+# Show help
+claude-auto-resume --help
 ```
 
-### Local Usage
+### Local Usage (Before Installation)
 
 ```bash
 # Ensure script is executable
 chmod +x claude-auto-resume.sh
 
-# Run the script
+# Start new session with default prompt
 ./claude-auto-resume.sh
+
+# Start new session with custom prompt
+./claude-auto-resume.sh "create login page"
+
+# Continue previous conversation
+./claude-auto-resume.sh -c "continue with the implementation"
 ```
 
 ## How It Works
@@ -77,7 +99,34 @@ chmod +x claude-auto-resume.sh
 2. **Parse Output**: Look for `Claude AI usage limit reached|<timestamp>` format messages
 3. **Calculate Wait Time**: Calculate required wait time based on timestamp
 4. **Display Countdown**: Show real-time remaining wait time
-5. **Auto Resume**: Automatically execute `claude -c --dangerously-skip-permissions -p 'continue'` after waiting
+5. **Auto Resume**: Automatically execute either:
+   - `claude --dangerously-skip-permissions -p "<custom-prompt>"` (new session, default)
+   - `claude -c --dangerously-skip-permissions -p "<custom-prompt>"` (continue conversation with -c flag)
+
+## Command Line Options
+
+- **No arguments**: Start new session with default prompt "continue"
+- **Single argument**: Start new session with custom prompt (e.g., `claude-auto-resume "implement feature"`)
+- **-p, --prompt**: Specify custom prompt with flag (e.g., `claude-auto-resume -p "write tests"`)
+- **-c, --continue**: Continue previous conversation (adds -c flag to claude command)
+- **-h, --help**: Show help message and usage examples
+
+## Session Types
+
+### Start New Session (Default)
+Uses `claude` without `-c` for fresh conversation:
+```bash
+claude-auto-resume                    # New session with "continue"
+claude-auto-resume "new feature"      # New session with custom prompt
+claude-auto-resume -p "write tests"   # New session with flag
+```
+
+### Continue Previous Conversation
+Uses `claude -c` to continue the last conversation:
+```bash
+claude-auto-resume -c "keep going"           # Continue with custom prompt
+claude-auto-resume -c -p "resume work"       # Continue with flag
+```
 
 ## Requirements
 

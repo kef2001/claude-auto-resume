@@ -61,7 +61,8 @@ if [ -n "$LIMIT_MSG" ]; then
     exit 4
   fi
   echo "Task has been automatically resumed and completed."
-  echo "CLAUDE_OUTPUT: \n $CLAUDE_OUTPUT2"
+  printf "CLAUDE_OUTPUT: \n"
+  echo "$CLAUDE_OUTPUT2"
   exit 0
 fi
 

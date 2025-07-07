@@ -216,6 +216,10 @@ If you encounter issues or have suggestions:
 2. Create a new Issue describing the problem
 3. Or submit a Pull Request
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=terryso/claude-auto-resume&type=Date)](https://www.star-history.com/#terryso/claude-auto-resume&Date)
+
 ---
 
 **Note**: This tool depends on Claude CLI output format. If Claude CLI updates change the output format, the script may need to be updated.

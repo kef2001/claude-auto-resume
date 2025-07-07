@@ -2,6 +2,8 @@
 
 A shell script utility that automatically resumes Claude CLI tasks when usage limits are lifted. It detects Claude usage restrictions, waits intelligently, and resumes task execution automatically.
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F1F11HO935)
+
 ## ⚠️ SECURITY WARNING
 
 **This script uses `--dangerously-skip-permissions` flag when executing Claude commands**, which means:

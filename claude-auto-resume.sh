@@ -92,7 +92,7 @@ done
 
 # Function to execute claude with the custom prompt
 execute_claude_with_prompt() {
-  local max_retries=3
+  local max_retries=6
   local retry_count=0
   
   while [ $retry_count -lt $max_retries ]; do
@@ -105,15 +105,53 @@ execute_claude_with_prompt() {
     fi
     RET_CODE=$?
     
-    # Check for API errors (500 Internal Server Error, etc.)
-    if echo "$CLAUDE_OUTPUT" | grep -q "API Error: 500" || echo "$CLAUDE_OUTPUT" | grep -q "Internal server error"; then
+    # Check for various API errors and set appropriate wait times
+    local wait_seconds=0
+    local error_type=""
+    
+    if echo "$CLAUDE_OUTPUT" | grep -q "API Error: 400" || echo "$CLAUDE_OUTPUT" | grep -q "invalid_request_error"; then
+      error_type="400 Bad Request (invalid_request_error)"
+      wait_seconds=60  # 1 minute for bad requests
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 401" || echo "$CLAUDE_OUTPUT" | grep -q "authentication_error"; then
+      error_type="401 Authentication Error"
+      # Authentication errors shouldn't be retried with wait
+      echo "[ERROR] Authentication error detected. Please check your API key."
+      echo "$CLAUDE_OUTPUT"
+      return 1
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 403" || echo "$CLAUDE_OUTPUT" | grep -q "permission_error"; then
+      error_type="403 Permission Error"
+      # Permission errors shouldn't be retried
+      echo "[ERROR] Permission error detected. Your API key lacks necessary permissions."
+      echo "$CLAUDE_OUTPUT"
+      return 1
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 404" || echo "$CLAUDE_OUTPUT" | grep -q "not_found_error"; then
+      error_type="404 Not Found Error"
+      wait_seconds=60  # 1 minute
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 413" || echo "$CLAUDE_OUTPUT" | grep -q "request_too_large"; then
+      error_type="413 Request Too Large"
+      # Request too large shouldn't be retried
+      echo "[ERROR] Request too large. Please reduce the request size."
+      echo "$CLAUDE_OUTPUT"
+      return 1
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 429" || echo "$CLAUDE_OUTPUT" | grep -q "rate_limit_error"; then
+      error_type="429 Rate Limit Error"
+      wait_seconds=300  # 5 minutes for rate limits
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 500" || echo "$CLAUDE_OUTPUT" | grep -q "Internal server error" || echo "$CLAUDE_OUTPUT" | grep -q "api_error"; then
+      error_type="500 Internal Server Error"
+      wait_seconds=1200  # 20 minutes for server errors
+    elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 529" || echo "$CLAUDE_OUTPUT" | grep -q "overloaded_error"; then
+      error_type="529 Overloaded Error"
+      wait_seconds=600  # 10 minutes for overload
+    fi
+    
+    # If an error was detected that should be retried
+    if [ $wait_seconds -gt 0 ]; then
       retry_count=$((retry_count + 1))
       if [ $retry_count -lt $max_retries ]; then
-        echo "[WARNING] API Error detected (500 Internal Server Error). Waiting 20 minutes before retry attempt $retry_count/$max_retries..."
+        echo "[WARNING] API Error detected ($error_type). Waiting before retry attempt $retry_count/$max_retries..."
         echo "Error details: $CLAUDE_OUTPUT"
         
-        # Wait 20 minutes with countdown
-        local wait_seconds=1200  # 20 minutes = 1200 seconds
+        # Wait with countdown
         while [ $wait_seconds -gt 0 ]; do
           printf "\rRetrying in %02d:%02d..." $((wait_seconds/60)) $((wait_seconds%60))
           sleep 1

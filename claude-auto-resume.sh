@@ -105,6 +105,30 @@ execute_claude_with_prompt() {
     fi
     RET_CODE=$?
     
+    # First check for usage limit message
+    LIMIT_MSG=$(echo "$CLAUDE_OUTPUT" | grep "Claude AI usage limit reached")
+    if [ -n "$LIMIT_MSG" ]; then
+      # Extract timestamp from usage limit message
+      RESUME_TIMESTAMP=$(echo "$CLAUDE_OUTPUT" | awk -F'|' '{print $2}' | tr -d '\r\n[:space:]')
+      if ! [[ "$RESUME_TIMESTAMP" =~ ^[0-9]+$ ]] || [ "$RESUME_TIMESTAMP" -le 0 ]; then
+        echo "[ERROR] Failed to extract a valid resume timestamp from CLI output during execution."
+        echo "Output was: $CLAUDE_OUTPUT"
+        return 1
+      fi
+      
+      echo "[INFO] Usage limit detected during execution."
+      wait_for_limit "$RESUME_TIMESTAMP"
+      
+      # After waiting, retry the command
+      retry_count=$((retry_count + 1))
+      if [ $retry_count -lt $max_retries ]; then
+        continue
+      else
+        echo "[ERROR] Usage limit persists after $max_retries attempts."
+        return 1
+      fi
+    fi
+    
     # Check for various API errors and set appropriate wait times
     local wait_seconds=0
     local error_type=""

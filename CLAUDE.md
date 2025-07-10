@@ -60,11 +60,13 @@ The project follows a single-file architecture:
 
 ### Core Logic Flow
 1. Parses command line arguments for custom prompt and session type (new vs continue)
-2. Runs `claude -p 'check'` command
-3. Parses output for usage limit messages with format: `Claude AI usage limit reached|<timestamp>`
-4. Calculates wait time from timestamp
-5. Displays countdown timer and waits
-6. Automatically runs either:
+2. Directly executes the claude command with the custom prompt
+3. If usage limit is detected in the output (format: `Claude AI usage limit reached|<timestamp>`):
+   - Extracts timestamp and calculates wait time
+   - Displays countdown timer and waits
+   - Automatically retries the command
+4. Handles various API errors with appropriate retry logic
+5. Command format:
    - `claude --dangerously-skip-permissions -p '<custom-prompt>'` (new session, default)
    - `claude -c --dangerously-skip-permissions -p '<custom-prompt>'` (continue conversation with -c flag)
 

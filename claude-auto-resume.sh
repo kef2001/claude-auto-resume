@@ -7,8 +7,6 @@
 DEFAULT_PROMPT="continue"
 # Default is to start new session (no -c flag)
 USE_CONTINUE_FLAG=false
-# Start execution even if no limit is detected
-START_IF_NO_LIMIT=false
 # Repeat execution continuously
 REPEAT_MODE=false
 
@@ -22,7 +20,6 @@ Automatically resume Claude CLI tasks after usage limits are lifted.
 OPTIONS:
     -p, --prompt PROMPT    Custom prompt to use when resuming (default: "continue")
     -c, --continue        Continue previous conversation (add -c flag to claude command)
-    -s, --start          Start execution even if no limit is detected
     -r, --repeat         Repeat execution continuously (waits on limits)
     -h, --help           Show this help message
 
@@ -35,9 +32,7 @@ EXAMPLES:
     claude-auto-resume -p "write unit tests"             # Start new session with -p flag
     claude-auto-resume -c "please continue the task"     # Continue previous conversation
     claude-auto-resume -c -p "resume where we left off"  # Continue previous conversation with -p flag
-    claude-auto-resume -s -p "analyze code"              # Start immediately even without limit
     claude-auto-resume -r -p "process all files"         # Repeat continuously
-    claude-auto-resume -s -r -p "complete project"       # Start immediately and repeat
 
 SECURITY WARNING:
     ⚠️  This script uses --dangerously-skip-permissions which bypasses all safety prompts.
@@ -63,10 +58,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--continue)
             USE_CONTINUE_FLAG=true
-            shift
-            ;;
-        -s|--start)
-            START_IF_NO_LIMIT=true
             shift
             ;;
         -r|--repeat)
@@ -244,53 +235,12 @@ wait_for_limit() {
 
 # Main execution loop
 while true; do
-  # 1. Run the claude CLI command to check for limits
-  CLAUDE_OUTPUT=$(claude -p 'check' 2>&1)
-  RET_CODE=$?
+  # Execute the actual command directly
+  execute_claude_with_prompt
+  EXEC_RESULT=$?
   
-  # 2. Check if usage limit is reached (output format: Claude AI usage limit reached|<timestamp>)
-  # Check for limit message first, regardless of return code
-  LIMIT_MSG=$(echo "$CLAUDE_OUTPUT" | grep "Claude AI usage limit reached")
-  
-  if [ -n "$LIMIT_MSG" ]; then
-    # Limit is reached - extract timestamp and wait
-    RESUME_TIMESTAMP=$(echo "$CLAUDE_OUTPUT" | awk -F'|' '{print $2}' | tr -d '\r\n[:space:]')
-    if ! [[ "$RESUME_TIMESTAMP" =~ ^[0-9]+$ ]] || [ "$RESUME_TIMESTAMP" -le 0 ]; then
-      echo "[ERROR] Failed to extract a valid resume timestamp from CLI output. Please check the output format."
-      echo "Output was: $CLAUDE_OUTPUT"
-      exit 2
-    fi
-    
-    wait_for_limit "$RESUME_TIMESTAMP"
-    execute_claude_with_prompt
-    EXEC_RESULT=$?
-    
-    if [ $EXEC_RESULT -ne 0 ]; then
-      exit 4
-    fi
-  else
-    # No limit detected
-    if [ $RET_CODE -ne 0 ]; then
-      echo "[ERROR] Claude CLI execution failed. Output:"
-      echo "$CLAUDE_OUTPUT"
-      exit 1
-    fi
-    
-    if [ "$START_IF_NO_LIMIT" = true ]; then
-      # Execute with prompt immediately
-      execute_claude_with_prompt
-      EXEC_RESULT=$?
-      
-      if [ $EXEC_RESULT -ne 0 ]; then
-        exit 4
-      fi
-    else
-      # Default behavior: exit
-      echo "No waiting required. Task completed."
-      if [ "$REPEAT_MODE" = false ]; then
-        exit 0
-      fi
-    fi
+  if [ $EXEC_RESULT -ne 0 ]; then
+    exit 4
   fi
   
   # Check if should repeat

@@ -225,6 +225,7 @@ while true; do
   RET_CODE=$?
   
   # 2. Check if usage limit is reached (output format: Claude AI usage limit reached|<timestamp>)
+  # Check for limit message first, regardless of return code
   LIMIT_MSG=$(echo "$CLAUDE_OUTPUT" | grep "Claude AI usage limit reached")
   
   if [ -n "$LIMIT_MSG" ]; then
@@ -232,6 +233,7 @@ while true; do
     RESUME_TIMESTAMP=$(echo "$CLAUDE_OUTPUT" | awk -F'|' '{print $2}')
     if ! [[ "$RESUME_TIMESTAMP" =~ ^[0-9]+$ ]] || [ "$RESUME_TIMESTAMP" -le 0 ]; then
       echo "[ERROR] Failed to extract a valid resume timestamp from CLI output. Please check the output format."
+      echo "Output was: $CLAUDE_OUTPUT"
       exit 2
     fi
     

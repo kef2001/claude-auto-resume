@@ -230,7 +230,7 @@ while true; do
   
   if [ -n "$LIMIT_MSG" ]; then
     # Limit is reached - extract timestamp and wait
-    RESUME_TIMESTAMP=$(echo "$CLAUDE_OUTPUT" | awk -F'|' '{print $2}')
+    RESUME_TIMESTAMP=$(echo "$CLAUDE_OUTPUT" | awk -F'|' '{print $2}' | tr -d '\r\n[:space:]')
     if ! [[ "$RESUME_TIMESTAMP" =~ ^[0-9]+$ ]] || [ "$RESUME_TIMESTAMP" -le 0 ]; then
       echo "[ERROR] Failed to extract a valid resume timestamp from CLI output. Please check the output format."
       echo "Output was: $CLAUDE_OUTPUT"

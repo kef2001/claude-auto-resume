@@ -9,6 +9,12 @@ DEFAULT_PROMPT="continue"
 USE_CONTINUE_FLAG=false
 # Repeat execution continuously
 REPEAT_MODE=false
+# Stop sequence to terminate on
+STOP_SEQUENCE=""
+# Auto-clear context on overflow
+AUTO_CLEAR=false
+# Max retries before clearing context
+MAX_CONTEXT_RETRIES=1
 
 # Function to show help
 show_help() {
@@ -21,6 +27,9 @@ OPTIONS:
     -p, --prompt PROMPT    Custom prompt to use when resuming (default: "continue")
     -c, --continue        Continue previous conversation (add -c flag to claude command)
     -r, --repeat         Repeat execution continuously (waits on limits)
+    -s, --stop SEQUENCE  Stop execution if this sequence appears in output
+    --auto-clear         Automatically start new session if context is too long
+    --max-context-retries N  Max retries before switching to new session (default: 1)
     -h, --help           Show this help message
 
 ARGUMENTS:
@@ -33,6 +42,9 @@ EXAMPLES:
     claude-auto-resume -c "please continue the task"     # Continue previous conversation
     claude-auto-resume -c -p "resume where we left off"  # Continue previous conversation with -p flag
     claude-auto-resume -r -p "process all files"         # Repeat continuously
+    claude-auto-resume -s "TASK_COMPLETE" "process data"  # Stop when "TASK_COMPLETE" appears
+    claude-auto-resume -c --auto-clear "continue"        # Auto-switch to new session on context overflow
+    claude-auto-resume -c --max-context-retries 3        # Try 3 times before starting fresh
 
 SECURITY WARNING:
     ⚠️  This script uses --dangerously-skip-permissions which bypasses all safety prompts.
@@ -43,6 +55,8 @@ NOTES:
     - By default, starts a new session (uses claude without -c)
     - Use -c/--continue to continue the previous conversation
     - This matches the natural expectation: new session by default, explicit flag to continue
+    - When using -c repeatedly, context may exceed Claude's token limit (200k tokens)
+    - Use --auto-clear to automatically start fresh when context is too long
 
 EOF
 }
@@ -63,6 +77,18 @@ while [[ $# -gt 0 ]]; do
         -r|--repeat)
             REPEAT_MODE=true
             shift
+            ;;
+        -s|--stop)
+            STOP_SEQUENCE="$2"
+            shift 2
+            ;;
+        --auto-clear)
+            AUTO_CLEAR=true
+            shift
+            ;;
+        --max-context-retries)
+            MAX_CONTEXT_RETRIES="$2"
+            shift 2
             ;;
         -h|--help)
             show_help
@@ -85,6 +111,8 @@ done
 execute_claude_with_prompt() {
   local max_retries=6
   local retry_count=0
+  local context_retry_count=0
+  local original_continue_flag=$USE_CONTINUE_FLAG
   
   while [ $retry_count -lt $max_retries ]; do
     if [ "$USE_CONTINUE_FLAG" = true ]; then
@@ -148,6 +176,29 @@ execute_claude_with_prompt() {
       echo "[ERROR] Request too large. Please reduce the request size."
       echo "$CLAUDE_OUTPUT"
       return 1
+    elif echo "$CLAUDE_OUTPUT" | grep -q "Prompt is too long" || echo "$CLAUDE_OUTPUT" | grep -q "token.*limit" || echo "$CLAUDE_OUTPUT" | grep -q "context.*too.*long"; then
+      # Context overflow detected
+      context_retry_count=$((context_retry_count + 1))
+      
+      if [ "$original_continue_flag" = true ] && ([ "$AUTO_CLEAR" = true ] || [ $context_retry_count -le $MAX_CONTEXT_RETRIES ]); then
+        echo "[WARNING] Context overflow detected (attempt $context_retry_count/$MAX_CONTEXT_RETRIES)."
+        
+        if [ "$AUTO_CLEAR" = true ] || [ $context_retry_count -le $MAX_CONTEXT_RETRIES ]; then
+          echo "[INFO] Switching to new session to clear context..."
+          USE_CONTINUE_FLAG=false
+          retry_count=$((retry_count + 1))
+          continue
+        fi
+      else
+        echo "[ERROR] Context is too long. Claude's token limit exceeded."
+        echo "Options:"
+        echo "  1. Start a new session without -c flag"
+        echo "  2. Use --auto-clear option to automatically handle this"
+        echo "  3. Clear the conversation history manually"
+        echo ""
+        echo "Error details: $CLAUDE_OUTPUT"
+        return 1
+      fi
     elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 429" || echo "$CLAUDE_OUTPUT" | grep -q "rate_limit_error"; then
       error_type="429 Rate Limit Error"
       wait_seconds=300  # 5 minutes for rate limits
@@ -186,6 +237,15 @@ execute_claude_with_prompt() {
     else
       # Success - just output the Claude response
       echo "$CLAUDE_OUTPUT"
+      
+      # Restore original continue flag for next iteration
+      USE_CONTINUE_FLAG=$original_continue_flag
+      
+      # Check for stop sequence if specified
+      if [ -n "$STOP_SEQUENCE" ] && echo "$CLAUDE_OUTPUT" | grep -q "$STOP_SEQUENCE"; then
+        return 99  # Special return code for stop sequence
+      fi
+      
       return 0
     fi
   done
@@ -237,7 +297,11 @@ while true; do
   execute_claude_with_prompt
   EXEC_RESULT=$?
   
-  if [ $EXEC_RESULT -ne 0 ]; then
+  if [ $EXEC_RESULT -eq 99 ]; then
+    # Stop sequence detected
+    echo "[INFO] Stop sequence '$STOP_SEQUENCE' detected. Process terminated successfully."
+    exit 0
+  elif [ $EXEC_RESULT -ne 0 ]; then
     exit 4
   fi
   

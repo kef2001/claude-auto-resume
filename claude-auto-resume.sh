@@ -184,9 +184,7 @@ execute_claude_with_prompt() {
       echo "$CLAUDE_OUTPUT"
       return 1
     else
-      # Success
-      echo "Task completed."
-      printf "CLAUDE_OUTPUT: \n"
+      # Success - just output the Claude response
       echo "$CLAUDE_OUTPUT"
       return 0
     fi

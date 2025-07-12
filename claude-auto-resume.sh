@@ -57,6 +57,7 @@ NOTES:
     - This matches the natural expectation: new session by default, explicit flag to continue
     - When using -c repeatedly, context may exceed Claude's token limit (200k tokens)
     - Use --auto-clear to automatically start fresh when context is too long
+    - When context overflow is detected, the script will first try /compact to compress context
 
 EOF
 }
@@ -132,6 +133,7 @@ execute_claude_with_prompt() {
       if ! [[ "$RESUME_TIMESTAMP" =~ ^[0-9]+$ ]] || [ "$RESUME_TIMESTAMP" -le 0 ]; then
         echo "[ERROR] Failed to extract a valid resume timestamp from CLI output during execution."
         echo "Output was: $CLAUDE_OUTPUT"
+        unset CLAUDE_OUTPUT
         return 1
       fi
       
@@ -160,12 +162,14 @@ execute_claude_with_prompt() {
       # Authentication errors shouldn't be retried with wait
       echo "[ERROR] Authentication error detected. Please check your API key."
       echo "$CLAUDE_OUTPUT"
+      unset CLAUDE_OUTPUT
       return 1
     elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 403" || echo "$CLAUDE_OUTPUT" | grep -q "permission_error"; then
       error_type="403 Permission Error"
       # Permission errors shouldn't be retried
       echo "[ERROR] Permission error detected. Your API key lacks necessary permissions."
       echo "$CLAUDE_OUTPUT"
+      unset CLAUDE_OUTPUT
       return 1
     elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 404" || echo "$CLAUDE_OUTPUT" | grep -q "not_found_error"; then
       error_type="404 Not Found Error"
@@ -175,6 +179,7 @@ execute_claude_with_prompt() {
       # Request too large shouldn't be retried
       echo "[ERROR] Request too large. Please reduce the request size."
       echo "$CLAUDE_OUTPUT"
+      unset CLAUDE_OUTPUT
       return 1
     elif echo "$CLAUDE_OUTPUT" | grep -q "Prompt is too long" || echo "$CLAUDE_OUTPUT" | grep -q "token.*limit" || echo "$CLAUDE_OUTPUT" | grep -q "context.*too.*long"; then
       # Context overflow detected
@@ -182,6 +187,23 @@ execute_claude_with_prompt() {
       
       if [ "$original_continue_flag" = true ] && ([ "$AUTO_CLEAR" = true ] || [ $context_retry_count -le $MAX_CONTEXT_RETRIES ]); then
         echo "[WARNING] Context overflow detected (attempt $context_retry_count/$MAX_CONTEXT_RETRIES)."
+        
+        # Try context compression first if continuing a conversation
+        if [ "$USE_CONTINUE_FLAG" = true ] && [ $context_retry_count -eq 1 ]; then
+          echo "[INFO] Attempting context compression with /compact..."
+          COMPACT_OUTPUT=$(claude -c --dangerously-skip-permissions -p "/compact" 2>&1)
+          COMPACT_RET=$?
+          
+          if [ $COMPACT_RET -eq 0 ]; then
+            echo "[INFO] Context compression successful. Retrying original command..."
+            # Small delay to ensure compression is applied
+            sleep 2
+            retry_count=$((retry_count + 1))
+            continue
+          else
+            echo "[WARNING] Context compression failed or not available."
+          fi
+        fi
         
         if [ "$AUTO_CLEAR" = true ] || [ $context_retry_count -le $MAX_CONTEXT_RETRIES ]; then
           echo "[INFO] Switching to new session to clear context..."
@@ -197,6 +219,7 @@ execute_claude_with_prompt() {
         echo "  3. Clear the conversation history manually"
         echo ""
         echo "Error details: $CLAUDE_OUTPUT"
+        unset CLAUDE_OUTPUT
         return 1
       fi
     elif echo "$CLAUDE_OUTPUT" | grep -q "API Error: 429" || echo "$CLAUDE_OUTPUT" | grep -q "rate_limit_error"; then
@@ -228,22 +251,47 @@ execute_claude_with_prompt() {
       else
         echo "[ERROR] API Error persists after $max_retries attempts. Output:"
         echo "$CLAUDE_OUTPUT"
+        
+        # For context overflow errors, try switching to new session after max retries
+        local has_context_error=0
+        if echo "$CLAUDE_OUTPUT" | grep -q "context limit" || echo "$CLAUDE_OUTPUT" | grep -q "exceed context limit" || echo "$CLAUDE_OUTPUT" | grep -q "input length.*exceed"; then
+          has_context_error=1
+        fi
+        
+        unset CLAUDE_OUTPUT
+        
+        if [ $has_context_error -eq 1 ] && [ "$original_continue_flag" = true ]; then
+          echo "[INFO] Context limit error detected after $max_retries attempts. Switching to new session..."
+          USE_CONTINUE_FLAG=false
+          retry_count=0  # Reset retry count for new session attempt
+          continue
+        fi
+        
         return 1
       fi
     elif [ $RET_CODE -ne 0 ]; then
       echo "[ERROR] Claude CLI failed. Output:"
       echo "$CLAUDE_OUTPUT"
+      unset CLAUDE_OUTPUT
       return 1
     else
-      # Success - just output the Claude response
+      # Success - output the Claude response and immediately clear variable
       echo "$CLAUDE_OUTPUT"
+      
+      # Check for stop sequence before clearing
+      local stop_found=0
+      if [ -n "$STOP_SEQUENCE" ] && echo "$CLAUDE_OUTPUT" | grep -q "$STOP_SEQUENCE"; then
+        stop_found=99  # Special return code for stop sequence
+      fi
+      
+      # Clear output variable immediately after use to free memory
+      unset CLAUDE_OUTPUT
       
       # Restore original continue flag for next iteration
       USE_CONTINUE_FLAG=$original_continue_flag
       
-      # Check for stop sequence if specified
-      if [ -n "$STOP_SEQUENCE" ] && echo "$CLAUDE_OUTPUT" | grep -q "$STOP_SEQUENCE"; then
-        return 99  # Special return code for stop sequence
+      if [ $stop_found -eq 99 ]; then
+        return 99
       fi
       
       return 0
@@ -309,6 +357,9 @@ while true; do
   if [ "$REPEAT_MODE" = false ]; then
     break
   fi
+  
+  # Clear output variable to prevent memory accumulation
+  unset CLAUDE_OUTPUT
   
   # Optional: Add small delay between iterations to avoid hammering the API
   echo "Waiting 5 seconds before next iteration..."

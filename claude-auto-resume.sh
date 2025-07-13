@@ -15,6 +15,8 @@ STOP_SEQUENCE=""
 AUTO_CLEAR=false
 # Max retries before clearing context
 MAX_CONTEXT_RETRIES=1
+# No-continue mode: only use -c flag when resuming from rate limit
+NO_CONTINUE_MODE=false
 
 # Function to show help
 show_help() {
@@ -26,6 +28,7 @@ Automatically resume Claude CLI tasks after usage limits are lifted.
 OPTIONS:
     -p, --prompt PROMPT    Custom prompt to use when resuming (default: "continue")
     -c, --continue        Continue previous conversation (add -c flag to claude command)
+    -nc, --no-continue    Only use -c flag when auto-resuming from rate limit
     -r, --repeat         Repeat execution continuously (waits on limits)
     -s, --stop SEQUENCE  Stop execution if this sequence appears in output
     --auto-clear         Automatically start new session if context is too long
@@ -41,6 +44,7 @@ EXAMPLES:
     claude-auto-resume -p "write unit tests"             # Start new session with -p flag
     claude-auto-resume -c "please continue the task"     # Continue previous conversation
     claude-auto-resume -c -p "resume where we left off"  # Continue previous conversation with -p flag
+    claude-auto-resume -nc "process files"               # Only continue when resuming from limit
     claude-auto-resume -r -p "process all files"         # Repeat continuously
     claude-auto-resume -s "TASK_COMPLETE" "process data"  # Stop when "TASK_COMPLETE" appears
     claude-auto-resume -c --auto-clear "continue"        # Auto-switch to new session on context overflow
@@ -54,6 +58,7 @@ SECURITY WARNING:
 NOTES:
     - By default, starts a new session (uses claude without -c)
     - Use -c/--continue to continue the previous conversation
+    - Use -nc/--no-continue to only use -c when resuming from rate limit
     - This matches the natural expectation: new session by default, explicit flag to continue
     - When using -c repeatedly, context may exceed Claude's token limit (200k tokens)
     - Use --auto-clear to automatically start fresh when context is too long
@@ -73,6 +78,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--continue)
             USE_CONTINUE_FLAG=true
+            shift
+            ;;
+        -nc|--no-continue)
+            NO_CONTINUE_MODE=true
             shift
             ;;
         -r|--repeat)
@@ -114,9 +123,16 @@ execute_claude_with_prompt() {
   local retry_count=0
   local context_retry_count=0
   local original_continue_flag=$USE_CONTINUE_FLAG
+  local is_resuming_from_limit=false
   
   while [ $retry_count -lt $max_retries ]; do
-    if [ "$USE_CONTINUE_FLAG" = true ]; then
+    # Determine if we should use -c flag based on NO_CONTINUE_MODE
+    local should_use_continue=$USE_CONTINUE_FLAG
+    if [ "$NO_CONTINUE_MODE" = true ] && [ "$is_resuming_from_limit" = false ]; then
+      should_use_continue=false
+    fi
+    
+    if [ "$should_use_continue" = true ]; then
       echo "Automatically continuing previous Claude conversation with prompt: '$CUSTOM_PROMPT'"
       CLAUDE_OUTPUT=$(claude -c --dangerously-skip-permissions -p "$CUSTOM_PROMPT" 2>&1)
     else
@@ -143,6 +159,8 @@ execute_claude_with_prompt() {
       # After waiting, retry the command
       retry_count=$((retry_count + 1))
       if [ $retry_count -lt $max_retries ]; then
+        # Mark that we're resuming from rate limit
+        is_resuming_from_limit=true
         continue
       else
         echo "[ERROR] Usage limit persists after $max_retries attempts."
@@ -189,7 +207,7 @@ execute_claude_with_prompt() {
         echo "[WARNING] Context overflow detected (attempt $context_retry_count/$MAX_CONTEXT_RETRIES)."
         
         # Try context compression first if continuing a conversation
-        if [ "$USE_CONTINUE_FLAG" = true ] && [ $context_retry_count -eq 1 ]; then
+        if [ "$should_use_continue" = true ] && [ $context_retry_count -eq 1 ]; then
           echo "[INFO] Attempting context compression with /compact..."
           COMPACT_OUTPUT=$(claude -c --dangerously-skip-permissions -p "/compact" 2>&1)
           COMPACT_RET=$?
@@ -207,7 +225,8 @@ execute_claude_with_prompt() {
         
         if [ "$AUTO_CLEAR" = true ] || [ $context_retry_count -le $MAX_CONTEXT_RETRIES ]; then
           echo "[INFO] Switching to new session to clear context..."
-          USE_CONTINUE_FLAG=false
+          # When in NO_CONTINUE_MODE, this will already be false, but we set it anyway
+          should_use_continue=false
           retry_count=$((retry_count + 1))
           continue
         fi
@@ -262,7 +281,7 @@ execute_claude_with_prompt() {
         
         if [ $has_context_error -eq 1 ] && [ "$original_continue_flag" = true ]; then
           echo "[INFO] Context limit error detected after $max_retries attempts. Switching to new session..."
-          USE_CONTINUE_FLAG=false
+          should_use_continue=false
           retry_count=0  # Reset retry count for new session attempt
           continue
         fi
@@ -286,9 +305,6 @@ execute_claude_with_prompt() {
       
       # Clear output variable immediately after use to free memory
       unset CLAUDE_OUTPUT
-      
-      # Restore original continue flag for next iteration
-      USE_CONTINUE_FLAG=$original_continue_flag
       
       if [ $stop_found -eq 99 ]; then
         return 99
